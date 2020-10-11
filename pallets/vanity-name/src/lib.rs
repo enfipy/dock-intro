@@ -96,6 +96,33 @@ decl_module! {
         /// The minimum period to register vanity name in blocks.
         const MinPeriodToRegister: u128 = T::MinPeriodToRegister::get();
 
+        fn on_initialize(now: T::BlockNumber) -> frame_support::weights::Weight {
+            // FIXME: Should be done through map with tuples (block, vec[name_ids]) that will be
+            // removed on specific block number.
+            let mut registered_names_count = Self::registered_names_count() as u128;
+            let mut id = 1;
+            while id <= registered_names_count {
+                if let Some(name) = Self::registered_names(id) {
+                    if name.registered_until <= now {
+                        <RegisteredNames<T>>::swap(id, registered_names_count);
+                        <RegisteredNames<T>>::remove(id);
+                        <AccountToNames<T>>::mutate(name.owner.clone(), |val| {
+                            if let Some(i) = val.iter().position(|x| *x == registered_names_count) {
+                                val.remove(i);
+                            }
+                        });
+                        <NameToAccount<T>>::mutate(name.name.clone(), |val| *val = None);
+                        <NameToNameId<T>>::mutate(name.name.clone(), |val| *val = None);
+                        registered_names_count -= 1;
+                    }
+                } else {
+                    id += 1;
+                }
+            }
+            RegisteredNamesCount::mutate(|val| *val = registered_names_count as u64);
+            return 0;
+        }
+
         #[weight = 10_000 + T::DbWeight::get().writes(1)]
         pub fn register_name(origin, name: T::String, amount: T::Balance) -> dispatch::DispatchResult {
             let who = ensure_signed(origin)?;
