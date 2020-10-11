@@ -1,5 +1,5 @@
 use crate::{mock::*, Error};
-use frame_support::{assert_noop, assert_ok};
+use frame_support::{assert_noop, assert_ok, traits::{WithdrawReason, WithdrawReasons}};
 
 #[test]
 fn test_register_name() {
@@ -53,6 +53,13 @@ fn test_register_and_renew_name() {
                 owner: 1,
             })
 		);
+		let reasons: WithdrawReasons = WithdrawReason::Reserve.into();
+		let lock = pallet_balances::BalanceLock{
+			id: *b"name_buy",
+			amount: 100000,
+			reasons: reasons.into(),
+		};
+		assert_eq!(Balances::locks(1), vec![lock]);
 
         assert_ok!(VanityNameModule::renew_registration(
             Origin::signed(1),

@@ -81,6 +81,7 @@ impl Trait for Test {
 }
 
 pub type System = frame_system::Module<Test>;
+pub type Balances = pallet_balances::Module<Test>;
 pub type VanityNameModule = Module<Test>;
 
 // Build genesis storage according to the mock runtime.

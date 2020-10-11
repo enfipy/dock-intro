@@ -8,7 +8,7 @@ mod tests;
 use codec::{Codec, Decode, Encode};
 use frame_support::{
     decl_error, decl_event, decl_module, decl_storage, dispatch,
-    traits::{Currency, Get},
+    traits::{Currency, Get, WithdrawReason, LockableCurrency},
     Parameter,
 };
 use frame_system::ensure_signed;
@@ -138,23 +138,27 @@ decl_module! {
                 Err(Error::<T>::NameAlreadyRegistered)?;
             }
 
-            let amount: u128 = amount.unique_saturated_into();
+            let s_amount: u128 = amount.unique_saturated_into();
             let base_price: u128 = T::MaxVanityNamePrice::get().unique_saturated_into();
             let price: u128 = ((base_price as f64) / (sname.len() as f64)).floor() as u128;
             let total_balance = <pallet_balances::Module<T>>::total_balance(&who);
-            if total_balance.unique_saturated_into() < price || price > amount {
+            if total_balance.unique_saturated_into() < price || price > s_amount {
                 Err(Error::<T>::NotEnoughBalance)?;
             }
 
             let block_number = <frame_system::Module<T>>::block_number().unique_saturated_into();
             let min_period = T::MinPeriodToRegister::get();
-            let registered_until = (block_number + (amount / price * min_period)).unique_saturated_into();
+            let registered_until = (block_number + (s_amount / price * min_period)).unique_saturated_into();
             let vanity_name = VanityName {
                 name: name.clone(),
                 price: T::Balance::unique_saturated_from(price),
                 registered_until,
                 owner: who.clone(),
             };
+
+            // TODO: Support multiple names.
+            const STAKING_ID: [u8; 8] = *b"name_buy";
+            <pallet_balances::Module<T>>::set_lock(STAKING_ID, &who, amount, WithdrawReason::Reserve.into());
 
             // TODO: Remove. I think this field is not necessary anymore.
             let registered_names_count = Self::registered_names_count() as u128 + 1;
@@ -184,18 +188,22 @@ decl_module! {
                 Err(Error::<T>::NameRegisteredWithDifferentAccount)?;
             }
 
-            let amount: u128 = amount.unique_saturated_into();
+            let s_amount: u128 = amount.unique_saturated_into();
             let base_price: u128 = T::MaxVanityNamePrice::get().unique_saturated_into();
             let price: u128 = ((base_price as f64) / (sname.len() as f64)).floor() as u128;
             let total_balance = <pallet_balances::Module<T>>::total_balance(&who);
-            if total_balance.unique_saturated_into() < price || price > amount {
+            if total_balance.unique_saturated_into() < price || price > s_amount {
                 Err(Error::<T>::NotEnoughBalance)?;
             }
 
             let block_number = <frame_system::Module<T>>::block_number().unique_saturated_into();
             let name_id = Self::name_to_name_id(name.clone()).ok_or(Error::<T>::NameNotRegistered)?;
             let min_period = T::MinPeriodToRegister::get();
-            let add_period = amount / price * min_period;
+            let add_period = s_amount / price * min_period;
+
+            // TODO: Support multiple names.
+            const STAKING_ID: [u8; 8] = *b"name_buy";
+            <pallet_balances::Module<T>>::extend_lock(STAKING_ID, &who, amount, WithdrawReason::Reserve.into());
 
             <RegisteredNames<T>>::try_mutate_exists(name_id, |maybe_name| -> Result<(), Error<T>> {
                 let mut vanity_name = maybe_name.clone().ok_or(Error::<T>::NameNotRegistered)?;
