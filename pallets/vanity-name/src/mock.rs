@@ -68,6 +68,7 @@ parameter_types! {
     pub const MinVanityNameLength: u32 = 1;
 	pub const MaxVanityNameLength: u32 = 63;
 	pub const MaxVanityNamePrice: u128 = 10000;
+	pub const MinPeriodToRegister: u128 = 100;
 }
 impl Trait for Test {
 	type Event = ();
@@ -76,6 +77,7 @@ impl Trait for Test {
 	type MinVanityNameLength = MinVanityNameLength;
 	type MaxVanityNameLength = MaxVanityNameLength;
 	type MaxVanityNamePrice = MaxVanityNamePrice;
+	type MinPeriodToRegister = MinPeriodToRegister;
 }
 
 pub type System = frame_system::Module<Test>;

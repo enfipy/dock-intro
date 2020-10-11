@@ -5,14 +5,17 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-use codec::{Codec, Encode, Decode};
+use codec::{Codec, Decode, Encode};
 use frame_support::{
     decl_error, decl_event, decl_module, decl_storage, dispatch,
     traits::{Currency, Get},
     Parameter,
 };
 use frame_system::ensure_signed;
-use sp_runtime::{RuntimeDebug, traits::{Member, UniqueSaturatedFrom, UniqueSaturatedInto}};
+use sp_runtime::{
+    traits::{Member, UniqueSaturatedFrom, UniqueSaturatedInto},
+    RuntimeDebug,
+};
 
 /// Configure the pallet by specifying the parameters and types on which it depends.
 pub trait Trait: pallet_balances::Trait {
@@ -24,6 +27,7 @@ pub trait Trait: pallet_balances::Trait {
     type MinVanityNameLength: Get<u32>;
     type MaxVanityNameLength: Get<u32>;
     type MaxVanityNamePrice: Get<<Self as pallet_balances::Trait>::Balance>;
+    type MinPeriodToRegister: Get<u128>;
 }
 
 #[derive(Clone, Default, PartialEq, RuntimeDebug, Encode, Decode)]
@@ -38,8 +42,9 @@ decl_storage! {
     trait Store for Module<T: Trait> as TemplateModule {
         pub RegisteredNamesCount get(fn registered_names_count): u64;
         pub RegisteredNames get(fn registered_names): map hasher(blake2_128_concat) u128 => Option<VanityName<T::AccountId, T::Balance, T::String, T::BlockNumber>>;
+        pub NameToNameId get(fn name_to_name_id): map hasher(blake2_128_concat) T::String => Option<u128>;
         pub NameToAccount get(fn name_to_account): map hasher(blake2_128_concat) T::String => Option<T::AccountId>;
-        pub AccountToName get(fn account_to_name): map hasher(blake2_128_concat) T::AccountId => Option<u128>;
+        pub AccountToNames get(fn account_to_name): map hasher(blake2_128_concat) T::AccountId => Vec<u128>;
     }
 }
 
@@ -68,6 +73,10 @@ decl_error! {
         InvalidPrice,
         /// Not enough balance
         NotEnoughBalance,
+        /// Name registered with different account
+        NameRegisteredWithDifferentAccount,
+        /// Name not registered
+        NameNotRegistered,
     }
 }
 
@@ -84,6 +93,8 @@ decl_module! {
         const MaxVanityNameLength: u32 = T::MaxVanityNameLength::get();
         /// The maximum price of vanity name.
         const MaxVanityNamePrice: T::Balance = T::MaxVanityNamePrice::get();
+        /// The minimum period to register vanity name in blocks.
+        const MinPeriodToRegister: u128 = T::MinPeriodToRegister::get();
 
         #[weight = 10_000 + T::DbWeight::get().writes(1)]
         pub fn register_name(origin, name: T::String, amount: T::Balance) -> dispatch::DispatchResult {
@@ -109,7 +120,8 @@ decl_module! {
             }
 
             let block_number = <frame_system::Module<T>>::block_number().unique_saturated_into();
-            let registered_until = (block_number + (amount / price)).unique_saturated_into();
+            let min_period = T::MinPeriodToRegister::get();
+            let registered_until = (block_number + (amount / price * min_period)).unique_saturated_into();
             let vanity_name = VanityName {
                 name: name.clone(),
                 price: T::Balance::unique_saturated_from(price),
@@ -121,8 +133,9 @@ decl_module! {
             let registered_names_count = Self::registered_names_count() as u128 + 1;
             <RegisteredNames<T>>::mutate(registered_names_count, |val| *val = Some(vanity_name));
             RegisteredNamesCount::mutate(|val| *val = *val + registered_names_count as u64);
-            <AccountToName<T>>::mutate(who.clone(), |val| *val = Some(registered_names_count));
+            <AccountToNames<T>>::mutate(who.clone(), |val| val.push(registered_names_count));
             <NameToAccount<T>>::mutate(name.clone(), |val| *val = Some(who.clone()));
+            <NameToNameId<T>>::mutate(name.clone(), |val| *val = Some(registered_names_count));
 
             Self::deposit_event(RawEvent::NameRegistered(who, name));
             Ok(())
@@ -130,21 +143,42 @@ decl_module! {
 
         /// An example dispatchable that may throw a custom error.
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn renew_registration(origin) -> dispatch::DispatchResult {
-            let _who = ensure_signed(origin)?;
+        pub fn renew_registration(origin, name: T::String, amount: T::Balance) -> dispatch::DispatchResult {
+            let who = ensure_signed(origin)?;
 
-            // Read a value from storage.
-            match None as Option<u32> {
-                // Return an error if the value has not been set.
-                None => Err(Error::<T>::NoneValue)?,
-                Some(old) => {
-                    // Increment the value read from storage; will error in the event of overflow.
-                    let _ = old.checked_add(1).ok_or(Error::<T>::NoneValue)?;
-                    // Update the value in storage with the incremented result.
-                    // Something::put(new);
-                    Ok(())
-                },
+            let tmp_name: Vec<u8> = name.clone().into();
+            let sname: &str = sp_std::str::from_utf8(&tmp_name[..]).map_err(|_| Error::<T>::InvalidName)?;
+            if (sname.len() as u32) < T::MinVanityNameLength::get() || (sname.len() as u32) > T::MaxVanityNameLength::get() {
+                Err(Error::<T>::InvalidName)?;
             }
+
+            let existed_name = Self::name_to_account(name.clone()).ok_or(Error::<T>::NameNotRegistered)?;
+            if existed_name != who {
+                Err(Error::<T>::NameRegisteredWithDifferentAccount)?;
+            }
+
+            let amount: u128 = amount.unique_saturated_into();
+            let base_price: u128 = T::MaxVanityNamePrice::get().unique_saturated_into();
+            let price: u128 = ((base_price as f64) / (sname.len() as f64)).floor() as u128;
+            let total_balance = <pallet_balances::Module<T>>::total_balance(&who);
+            if total_balance.unique_saturated_into() < price || price > amount {
+                Err(Error::<T>::NotEnoughBalance)?;
+            }
+
+            let block_number = <frame_system::Module<T>>::block_number().unique_saturated_into();
+            let name_id = Self::name_to_name_id(name.clone()).ok_or(Error::<T>::NameNotRegistered)?;
+            let min_period = T::MinPeriodToRegister::get();
+            let add_period = amount / price * min_period;
+
+            <RegisteredNames<T>>::try_mutate_exists(name_id, |maybe_name| -> Result<(), Error<T>> {
+                let mut vanity_name = maybe_name.clone().ok_or(Error::<T>::NameNotRegistered)?;
+                vanity_name.registered_until = (vanity_name.registered_until.unique_saturated_into() + add_period).unique_saturated_into();
+                *maybe_name = Some(vanity_name);
+                Ok(())
+            })?;
+
+            Self::deposit_event(RawEvent::NameRenewed(who, name, block_number.unique_saturated_into()));
+            Ok(())
         }
     }
 }
