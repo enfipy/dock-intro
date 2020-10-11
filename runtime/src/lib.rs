@@ -261,10 +261,20 @@ impl pallet_sudo::Trait for Runtime {
 	type Call = Call;
 }
 
+parameter_types! {
+    pub const MinVanityNameLength: u32 = 1;
+	pub const MaxVanityNameLength: u32 = 63;
+	pub const MaxVanityNamePrice: u128 = 10000;
+	pub const MinPeriodToRegister: u128 = 100;
+}
 impl pallet_vanity_name::Trait for Runtime {
 	type Event = Event;
 	type String = Vec<u8>;
-	type Balance = Balance;
+
+	type MinVanityNameLength = MinVanityNameLength;
+	type MaxVanityNameLength = MaxVanityNameLength;
+	type MaxVanityNamePrice = MaxVanityNamePrice;
+	type MinPeriodToRegister = MinPeriodToRegister;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

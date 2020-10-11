@@ -1,6 +1,8 @@
-# Substrate Node Template
+# Substrate Node for Dock.io
 
-A new FRAME-based Substrate node, ready for hacking :rocket:
+Task for Dock.io.
+
+To run tests of module run: `cargo test -p pallet-vanity-name`
 
 ## Local Development
 
